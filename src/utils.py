@@ -137,6 +137,16 @@ def prune_by_percentile(model, mask, percent):
             step += 1
 
 
+def update_client_model_with_global(client_model, global_model_state_dict):
+    '''
+    Does not update BN parameters
+    '''
+    for name, param in client_model.named_parameters():
+        if 'bn' not in name:
+            param.data = global_model_state_dict[name].data.clone()
+    return client_model
+
+
 def average_weights_with_masks(w, masks, device):
     '''
     Returns the average of the weights computed with masks.
@@ -167,8 +177,7 @@ def mix_global_weights(global_weights_last, global_weights_this_round, masks, de
             mask = masks[0][step]
             for i in range(1, len(masks)):
                 mask += masks[i][step]
-            global_weights[key] = torch.from_numpy(
-                np.where(mask < 1, global_weights_last[key].cpu(), global_weights_this_round[key].cpu())).to(device)
+            global_weights[key] = torch.from_numpy(np.where(mask < 1, global_weights_last[key].cpu(), global_weights_this_round[key].cpu())).to(device)
             step += 1
     return global_weights
 

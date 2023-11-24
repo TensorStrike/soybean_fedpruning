@@ -9,7 +9,7 @@ import math
 
 class Client(object):
     def __init__(self, idx, model, train_fed_loader, val_fed_loader, test_fed_loader, bs, ep, lr, mask,
-                 current_prune_ratio, threshold, prune_wait, device):
+                 current_prune_ratio, threshold, prune_wait, device, global_model_state_dict, use_fedbn, use_fedprox):
         self.idx = idx
         self.model = model
         self.bs = bs
@@ -29,6 +29,9 @@ class Client(object):
         self.best_mask = mask
         self.best_model = model
         self.temp_model = None
+        self.global_model_state_dict = global_model_state_dict
+        self.use_fedbn = use_fedbn
+        self.use_fedprox = use_fedprox
 
     def get_mask(self):
         return self.mask
@@ -89,6 +92,22 @@ class Client(object):
                     optimizer.zero_grad()
                     prediction = model(batch_weather, batch_soil.unsqueeze(1), batch_management.unsqueeze(1), batch_pre_y)
                     loss = self.criterion(prediction, batch_y)
+
+                    # fedprox proximal term
+                    if self.use_fedprox:
+                        proximal_loss = 0
+                        mu = 0.01
+                        # print("Length of self.model.parameters():", len(list(self.model.parameters())))
+                        # print("Length of self.global_model_state_dict.values():", len(list(self.global_model_state_dict.values())))
+                        global_model_params = {k: v for k, v in self.global_model_state_dict.items() if 'weight' in k or 'bias' in k}   # filter trainable parameters
+                        for local_name, local_param in self.model.named_parameters():
+                            global_param = global_model_params.get(local_name)
+                            if global_param is not None:
+                                proximal_loss += (mu / 2) * (local_param - global_param.to(self.device)).pow(2).sum()
+                            else:
+                                print("No matching global parameter for:", local_name)  # For debugging
+                        loss = loss + proximal_loss
+                        # print(loss, proximal_loss)
                     loss.backward()
                     if freeze:
                         # freeze pruned weights by making their gradients 0
