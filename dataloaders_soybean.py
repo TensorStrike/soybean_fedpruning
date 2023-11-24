@@ -67,6 +67,8 @@ def load_all_data(path, predict_year):
 
         # Test
         data_test[:, 4:] = (data_test[:, 4:] - mn) / sd
+
+
         # data_test = data_test
 
         comb_data = np.vstack((data_train, data_test))

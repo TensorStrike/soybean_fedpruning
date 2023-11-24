@@ -11,16 +11,17 @@ loc_path = './data/Soybeans_Loc_ID.csv'
 num_users = 9
 rounds = 40
 bs = 50
-ep = 8
+ep = 5
 lr = 0.00001
 threshold = 30
-target_prune_ratio = 0.79     # max prune ratio, 0-1, set 0 for no pruning
+target_prune_ratio = 0     # max prune ratio, 0-1, set 0 for no pruning
 prune_percent = 41.5  # amount to prune per round, 0-100
 prunt_wait = 7
 year = 2018
 early_stop = True
 lottery_ticket = False
-
+use_fedbn = True
+use_fedprox = False
 
 if torch.cuda.is_available():
     device = torch.device("cuda:0")
@@ -35,6 +36,7 @@ train_fed_loaders, val_fed_loaders, test_fed_loaders = load_all_data(ds_path, ye
 #                                           train_fed_loaders[4],train_fed_loaders[5],train_fed_loaders[6],train_fed_loaders[7],train_fed_loaders[8]])
 # test_fed_loaders[0] = ConcatDataset([test_fed_loaders[0],test_fed_loaders[1],test_fed_loaders[2],test_fed_loaders[3],test_fed_loaders[4],test_fed_loaders[5],test_fed_loaders[6],test_fed_loaders[7], test_fed_loaders[8]])
 # val_fed_loaders[0] = test_fed_loaders[0]
+#
 
 
 # initialize models
@@ -61,7 +63,7 @@ clients = []
 for i in range(num_users):
     users_model[i].load_state_dict(initial_state_dict)
     clients.append(Client(i, copy.deepcopy(users_model[i]), train_fed_loaders[i], val_fed_loaders[i], test_fed_loaders[i],
-                          bs, ep, lr, copy.deepcopy(masks_list[i]), 0, threshold, prunt_wait, device))
+                          bs, ep, lr, copy.deepcopy(masks_list[i]), 0, threshold, prunt_wait, device, global_weights, use_fedbn, use_fedprox))
 
 
 Byte = 8
@@ -84,28 +86,28 @@ param_pruned = []
 # training
 for r in range(rounds):
     print('Start Round {} ...'.format(r + 1))
+    global_model_state_dict = global_model.state_dict()  # fedprox reference global
     local_weights, local_losses, local_sparsity = [], [], []
     prune_ratios_this_round = []
     temp_masks = []
     avg_agg_loss_this_round = 0
     print(is_aggre)
     for client in clients:
-        if r == 4 or r == 9 or r == 19:
+        client.global_model_state_dict = global_model_state_dict        # fedprox reference global
+        if r == 4:
             client.lr = lr * 0.2
-            print('***** Learning rate set to ', client.lr)
+        elif r == 9:
+            client.lr = lr * 0.2 * 0.2
+        print('***** Learning rate set to ', client.lr)
         print('---------------------------client {}---------------------------'.format(client.idx+1))
+        # local_model = copy.deepcopy(global_model)
+        # mask_model(local_model, client.mask, local_model.state_dict())
 
-        # if is_aggre[client.idx] == 0:    # if client did not aggregate last round, weights are combined with global
-        #     a = copy.deepcopy(global_model.state_dict())
-        #     b = copy.deepcopy(client.model.state_dict())
-        #     for layer in a:
-        #         a[layer] = (a[layer] + b[layer]) / 2
-        #     tm = SoybeanCNN().to(device)
-        #     tm.load_state_dict(a)
-        #     local_model = tm
-        # else:
-        #     local_model = copy.deepcopy(global_model)
-        local_model = copy.deepcopy(global_model)
+        if use_fedbn:
+            # Initialize local_model with the global model's weights except for BN layers
+            local_model = update_client_model_with_global(client.model, global_model.state_dict())
+        else:
+            local_model = copy.deepcopy(global_model)
         mask_model(local_model, client.mask, local_model.state_dict())
 
         # prune if target sparsity has not been reached
